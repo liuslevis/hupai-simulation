@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>沪牌拍卖尾盘 Simulation</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f5f2;
+      --panel: #fff;
+      --ink: #181818;
+      --muted: #737373;
+      --line: #d8d8d2;
+      --yellow: #ffd84d;
+      --red: #e5362c;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, input, select { font: inherit; }
+    button, select, input[type="number"], input[type="text"] {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      padding: 7px 9px;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: #999; }
+
+    main { width: min(1180px, calc(100% - 28px)); margin: 24px auto 48px; }
+    h1 { margin: 0; font-size: clamp(22px, 4vw, 34px); letter-spacing: -.04em; }
+    .subtitle { margin: 5px 0 20px; color: var(--muted); }
+    .toolbar, .playbar, .hud {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .toolbar label { display: grid; gap: 4px; }
+    .toolbar label span { color: var(--muted); font-size: 12px; }
+    .toolbar .spacer { flex: 1; }
+    .hash { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .card {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .card-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+    }
+    .card-title small { color: var(--muted); font-weight: 400; }
+
+    .buckets-wrap { overflow-x: auto; padding: 18px 14px 12px; }
+    .buckets {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 82px;
+      gap: 6px;
+      min-height: 165px;
+      align-items: end;
+    }
+    .bucket {
+      position: relative;
+      height: 147px;
+      padding: 24px 5px 32px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #f2f2ef;
+    }
+    .bucket.in-range { box-shadow: inset 0 0 0 2px #222; }
+    .bucket.has-winner { background: #fff8cf; }
+    .bucket.manual-clickable { cursor: crosshair; }
+    .bucket.manual-clickable:hover { background: #e9f2ff; }
+    .bucket-price {
+      position: absolute;
+      bottom: 7px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .bucket-count {
+      position: absolute;
+      top: 5px;
+      right: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .dots {
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      gap: 3px;
+      max-height: 91px;
+      overflow-y: auto;
+      overflow-anchor: none;
+      overscroll-behavior: contain;
+    }
+    .dot {
+      position: relative;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #a6a6a0;
+    }
+    .dot.winner { background: var(--yellow); box-shadow: 0 0 0 1px #b99b20; }
+    .dot.player-group {
+      background: var(--red);
+      box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--red);
+    }
+    .range-flag {
+      position: absolute;
+      top: -17px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 13px;
+    }
+    .bid-tooltip {
+      position: fixed;
+      z-index: 1000;
+      display: none;
+      max-width: 260px;
+      padding: 6px 8px;
+      border-radius: 5px;
+      background: #181818;
+      color: #fff;
+      font-size: 12px;
+      line-height: 1.35;
+      pointer-events: none;
+      box-shadow: 0 3px 12px rgb(0 0 0 / 18%);
+      white-space: nowrap;
+    }
+    .bid-tooltip.visible { display: block; }
+
+    .hud { padding: 13px 15px; border-top: 1px solid var(--line); }
+    .metric { min-width: 145px; }
+    .metric strong { display: block; font-size: 19px; }
+    .metric span { color: var(--muted); font-size: 12px; }
+    .playbar { padding: 13px 15px; border-top: 1px solid var(--line); }
+    .playbar input[type="range"] { flex: 1; min-width: 220px; accent-color: #222; }
+    .time { min-width: 100px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .strategy { padding: 15px; }
+    .result {
+      margin-top: 14px;
+      padding: 12px;
+      border-left: 4px solid var(--line);
+      background: #f7f7f4;
+    }
+    .result.win { border-color: var(--yellow); }
+    .result.loss { border-color: var(--red); }
+    .result strong { font-size: 16px; }
+    .result-detail { margin-top: 4px; color: var(--muted); }
+    .warning { color: #9e241d; }
+
+    @media (max-width: 620px) {
+      main { width: min(100% - 18px, 1180px); margin-top: 14px; }
+      .toolbar label { flex: 1; }
+      .toolbar select, .toolbar input { width: 100%; }
+      .metric { min-width: 44%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>沪牌拍卖尾盘 Simulation</h1>
+    <p class="subtitle">规则研究与历史剧本模拟，不连接国拍系统，不用于实盘自动出价。</p>
+
+    <div class="toolbar">
+      <label>
+        <span>月份锚点</span>
+        <select id="month"></select>
+      </label>
+      <label>
+        <span>Seed</span>
+        <input id="seed" type="text" value="1" inputmode="numeric">
+      </label>
+      <button id="regenerate" type="button">重新生成</button>
+      <div class="spacer"></div>
+      <span class="hash" id="scenarioHash"></span>
+    </div>
+
+    <section class="card">
+      <div class="card-title">
+        <span>价格 buckets</span>
+        <small>报价点写入后永久保留；前 N 名队列内且处于有效区间的点为黄色，玩家为红点</small>
+      </div>
+      <div class="buckets-wrap">
+        <div class="buckets" id="buckets"></div>
+      </div>
+      <div class="hud">
+        <div class="metric"><strong id="remaining">10.0s</strong><span>剩余时间</span></div>
+        <div class="metric"><strong id="range">—</strong><span>处理时可报区间</span></div>
+        <div class="metric"><strong id="floor">—</strong><span>市场最低可成交价 L</span></div>
+        <div class="metric"><strong id="averagePrice">—</strong><span>平均成交价 / 官方参考</span></div>
+        <div class="metric"><strong id="simF">—</strong><span>最低成交价 / 官方锚点</span></div>
+        <div class="metric"><strong id="cutoff">—</strong><span>最低成交价最后中标用户提交时间 / 官方参考</span></div>
+        <div class="metric"><strong id="activity">—</strong><span>胜出队列 / 已出价</span></div>
+      </div>
+      <div class="playbar">
+        <button id="play" type="button" aria-label="播放或暂停">▶</button>
+        <button id="replay" type="button" aria-label="重新播放">↻</button>
+        <select id="playbackRate" aria-label="播放速率">
+          <option value="0.1">0.1×</option>
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+        </select>
+        <input id="progress" type="range" min="0" max="10" step="0.02" value="0">
+        <span class="time" id="clock">11:29:50.0</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">
+        <span>我的手动出价</span>
+        <small>点击当前有效区间内的 bucket，立即写入一次报价</small>
+      </div>
+      <div class="strategy">
+        <div class="result-detail" id="strategyHint"></div>
+        <div class="result" id="result"></div>
+      </div>
+    </section>
+  </main>
+  <div class="bid-tooltip" id="bidTooltip" role="tooltip"></div>
+
+  <script>
+    "use strict";
+
+    const DURATION = 10;
+    const PRICE_STEP = 100;
+    const BAND = 300;
+    const DOT_GROUP_SIZE = 100;
+
+    const monthAnchors = [
+      { id: "2025-10", label: "2025年10月", quota: 4403, participants: 23586, finalFloor: 93800, averagePrice: 93874, winningRate: 18.7, initialFloorOffset: 500, cutoffRemaining: 10, cutoffRank: 1103, jumpAggressiveness: 0.98 },
+      { id: "2025-09", label: "2025年9月", quota: 4230, participants: 25210, finalFloor: 93700, averagePrice: 93778, winningRate: 16.8, initialFloorOffset: 500, cutoffRemaining: 1, cutoffRank: 930, jumpAggressiveness: 0.9 },
+      { id: "2025-08", label: "2025年8月", quota: 4061, participants: 28264, finalFloor: 93800, averagePrice: 93868, winningRate: 14.4, initialFloorOffset: 600, cutoffRemaining: 9, cutoffRank: 1262, jumpAggressiveness: 0.72 },
+      { id: "2025-07", label: "2025年7月", quota: 4286, participants: 30798, finalFloor: 93600, averagePrice: 93679, winningRate: 13.9, initialFloorOffset: 600, cutoffRemaining: 1, cutoffRank: 887, jumpAggressiveness: 0.82 },
+      { id: "2025-06", label: "2025年6月", quota: 3809, participants: 33834, finalFloor: 94300, averagePrice: 94368, winningRate: 11.3, initialFloorOffset: 800, cutoffRemaining: 1, cutoffRank: 1212, jumpAggressiveness: 0.84 },
+      { id: "2025-05", label: "2025年5月", quota: 4101, participants: 35649, finalFloor: 94300, averagePrice: 94368, winningRate: 11.5, initialFloorOffset: 800, cutoffRemaining: 1, cutoffRank: 1302, jumpAggressiveness: 0.84 },
+      { id: "2025-04", label: "2025年4月", quota: 3874, participants: 38639, finalFloor: 94200, averagePrice: 94391, winningRate: 10.0, initialFloorOffset: 900, cutoffRemaining: 1, cutoffRank: 38, jumpAggressiveness: 0.82 },
+      { id: "2025-03", label: "2025年3月", quota: 3710, participants: 40205, finalFloor: 94100, averagePrice: 94100, winningRate: 9.2, initialFloorOffset: 1000, cutoffRemaining: 1, cutoffRank: 1797, jumpAggressiveness: 0.86 },
+      { id: "2025-02", label: "2025年2月", quota: 3793, participants: 39780, finalFloor: 94100, averagePrice: 94100, winningRate: 9.5, initialFloorOffset: 900, cutoffRemaining: 1, cutoffRank: 3793, jumpAggressiveness: 0.86 },
+      { id: "2025-01", label: "2025年1月", quota: 3784, participants: 42564, finalFloor: 94100, averagePrice: 94159, winningRate: 8.9, initialFloorOffset: 1000, cutoffRemaining: 2, cutoffRank: 2196, jumpAggressiveness: 0.86 }
+    ];
+
+    const dom = Object.fromEntries([
+      "month", "seed", "regenerate", "scenarioHash", "buckets", "remaining", "range",
+      "floor", "averagePrice", "simF", "cutoff", "activity", "play", "replay", "playbackRate",
+      "progress", "clock",
+      "strategyHint", "result", "bidTooltip"
+    ].map(id => [id, document.getElementById(id)]));
+
+    const state = {
+      scenario: null,
+      player: null,
+      manualBid: null,
+      playback: { t: 0, playing: false, lastFrame: 0, lastRender: -1 }
+    };
+
+    function mulberry32(seed) {
+      return function random() {
+        let t = seed += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+
+    function hashString(value) {
+      let hash = 2166136261;
+      for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return hash >>> 0;
+    }
+
+    function roundPrice(value) {
+      return Math.round(value / PRICE_STEP) * PRICE_STEP;
+    }
+
+    function changeCount(counts, price, delta) {
+      const next = (counts.get(price) || 0) + delta;
+      if (next === 0) counts.delete(price);
+      else counts.set(price, next);
+    }
+
+    function floorFromCounts(counts, quota) {
+      let seen = 0;
+      const prices = [...counts.keys()].sort((a, b) => b - a);
+      for (const price of prices) {
+        seen += counts.get(price);
+        if (seen >= quota) return price;
+      }
+      throw new Error("完整竞价人口少于 quota");
+    }
+
+    function floorAt(events, t) {
+      let low = 0;
+      let high = events.length - 1;
+      let answer = events[0].price;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (events[mid].t <= t) {
+          answer = events[mid].price;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+      return answer;
+    }
+
+    function generateScenario(anchor, seedText) {
+      const seed = hashString(`${anchor.id}:${seedText}`);
+      const random = mulberry32(seed);
+      const quota = anchor.quota;
+      const participants = Math.max(quota + 1, anchor.participants);
+      const npcCount = participants - 1;
+      const initialCount = Math.min(
+        npcCount,
+        Math.max(quota + 10, Math.round(npcCount * (anchor.initialBidShare ?? 0.58)))
+      );
+      const initialPrices = new Int32Array(initialCount);
+      const initialTimes = new Float64Array(initialCount);
+      const finalPrices = new Int32Array(npcCount);
+      const finalTimes = new Float64Array(npcCount);
+      const counts = new Map();
+
+      const targetInitialFloor = roundPrice(anchor.finalFloor - (anchor.initialFloorOffset ?? 200));
+      const aboveFloorCount = Math.min(quota - 1, Math.round(quota * 0.65));
+      const atFloorCount = quota - aboveFloorCount;
+      const initialPricePool = [];
+      for (let i = 0; i < aboveFloorCount; i++) {
+        initialPricePool.push(targetInitialFloor + (1 + Math.floor(random() * 3)) * PRICE_STEP);
+      }
+      for (let i = 0; i < atFloorCount; i++) {
+        initialPricePool.push(targetInitialFloor);
+      }
+      while (initialPricePool.length < initialCount) {
+        initialPricePool.push(targetInitialFloor - (1 + Math.floor(random() * 3)) * PRICE_STEP);
+      }
+      for (let i = initialPricePool.length - 1; i > 0; i--) {
+        const swapIndex = Math.floor(random() * (i + 1));
+        [initialPricePool[i], initialPricePool[swapIndex]] = [initialPricePool[swapIndex], initialPricePool[i]];
+      }
+
+      for (let i = 0; i < initialCount; i++) {
+        const price = initialPricePool[i];
+        const writeTime = -1800 + random() * 1790;
+        initialPrices[i] = finalPrices[i] = price;
+        initialTimes[i] = finalTimes[i] = writeTime;
+        changeCount(counts, price, 1);
+      }
+
+      const initialFloor = floorFromCounts(counts, quota);
+      const pending = [];
+      const exponent = 1 / (1.8 + anchor.jumpAggressiveness * 4.2);
+      for (let bidder = initialCount; bidder < npcCount; bidder++) {
+        const clustered = Math.pow(random(), exponent);
+        pending.push({
+          bidder,
+          writeTime: Math.min(DURATION, DURATION * clustered),
+          preference: random()
+        });
+      }
+      pending.sort((a, b) => a.writeTime - b.writeTime || a.bidder - b.bidder);
+
+      const acceptedEvents = [];
+      const floorEvents = [{ t: 0, price: initialFloor }];
+      let currentFloor = initialFloor;
+
+      for (const event of pending) {
+        const offset = event.preference < 0.08 ? 0
+          : event.preference < 0.25 ? 100
+          : event.preference < 0.57 ? 200
+          : 300;
+        const proposedPrice = Math.min(anchor.maxPrice ?? Infinity, currentFloor + offset);
+        changeCount(counts, proposedPrice, 1);
+        finalPrices[event.bidder] = proposedPrice;
+        finalTimes[event.bidder] = event.writeTime;
+        acceptedEvents.push({
+          bidder: event.bidder,
+          price: proposedPrice,
+          writeTime: event.writeTime
+        });
+
+        const nextFloor = floorFromCounts(counts, quota);
+        if (nextFloor !== currentFloor) {
+          currentFloor = nextFloor;
+          floorEvents.push({ t: event.writeTime, price: currentFloor });
+        }
+      }
+
+      const finalMarket = marketStats(finalPrices, finalTimes, quota);
+      const hashPayload = [
+        seed,
+        initialFloor,
+        acceptedEvents.length,
+        floorEvents.map(event => `${event.t.toFixed(4)}:${event.price}`).join("|"),
+        finalMarket.floor
+      ].join("/");
+
+      return {
+        anchor,
+        quota,
+        participants,
+        seed,
+        initialPrices,
+        initialTimes,
+        acceptedEvents,
+        floorEvents,
+        finalPrices,
+        finalTimes,
+        finalMarket,
+        hash: hashString(hashPayload).toString(16).padStart(8, "0")
+      };
+    }
+
+    function marketStats(prices, times, quota, playerBid = null) {
+      const counts = new Map();
+      for (let i = 0; i < prices.length; i++) changeCount(counts, prices[i], 1);
+      if (playerBid) changeCount(counts, playerBid.price, 1);
+
+      const floor = floorFromCounts(counts, quota);
+      let above = 0;
+      let winningTotal = 0;
+      for (const [price, count] of counts) {
+        if (price > floor) {
+          above += count;
+          winningTotal += price * count;
+        }
+      }
+      const seatsAtFloor = quota - above;
+      winningTotal += floor * seatsAtFloor;
+      const floorTimes = [];
+      for (let i = 0; i < prices.length; i++) {
+        if (prices[i] === floor) floorTimes.push(times[i]);
+      }
+      if (playerBid && playerBid.price === floor) floorTimes.push(playerBid.writeTime);
+      floorTimes.sort((a, b) => a - b);
+
+      return {
+        counts,
+        floor,
+        averagePrice: winningTotal / quota,
+        cutoffTime: floorTimes[Math.max(0, seatsAtFloor - 1)],
+        seatsAtFloor
+      };
+    }
+
+    function simulateManualPlayer(manualBid, scenario) {
+      if (!manualBid) {
+        return finalizePlayer({ price: null }, "not-triggered", "manual", Infinity, Infinity, scenario);
+      }
+      const inputs = { price: manualBid.price };
+      const clickTime = manualBid.clickTime;
+      const writeTime = clickTime;
+      const processingFloor = floorAt(scenario.floorEvents, writeTime);
+      if (inputs.price < processingFloor - BAND
+        || inputs.price > processingFloor + BAND
+        || inputs.price > (scenario.anchor.maxPrice ?? Infinity)) {
+        return finalizePlayer(
+          inputs,
+          "invalid-out-of-range",
+          "manual",
+          clickTime,
+          writeTime,
+          scenario,
+          processingFloor
+        );
+      }
+
+      return finalizePlayer(inputs, "valid", "manual", clickTime, writeTime, scenario, processingFloor);
+    }
+
+    function finalizePlayer(inputs, status, trigger, clickTime, writeTime, scenario, processingFloor = null) {
+      const valid = status === "valid";
+      const finalPrice = valid ? inputs.price : null;
+      const finalWriteTime = valid ? writeTime : null;
+      if (!valid) {
+        return {
+          ...inputs,
+          status,
+          trigger,
+          clickTime,
+          writeTime,
+          processingFloor,
+          finalPrice,
+          finalWriteTime,
+          rank: null,
+          won: false
+        };
+      }
+
+      let rank = 1;
+      for (let i = 0; i < scenario.finalPrices.length; i++) {
+        if (scenario.finalPrices[i] > finalPrice
+          || (scenario.finalPrices[i] === finalPrice && scenario.finalTimes[i] < finalWriteTime)) {
+          rank++;
+        }
+      }
+      return {
+        ...inputs,
+        status,
+        trigger,
+        clickTime,
+        writeTime,
+        processingFloor,
+        finalPrice,
+        finalWriteTime,
+        rank,
+        won: rank <= scenario.quota
+      };
+    }
+
+    function bookAt(t, scenario) {
+      let processed = 0;
+      for (const event of scenario.acceptedEvents) {
+        if (event.writeTime > t) break;
+        processed++;
+      }
+      const size = scenario.initialPrices.length + processed;
+      const prices = new Int32Array(size);
+      const times = new Float64Array(size);
+      const ids = new Array(size);
+      prices.set(scenario.initialPrices);
+      times.set(scenario.initialTimes);
+      for (let i = 0; i < scenario.initialPrices.length; i++) ids[i] = i;
+      for (let i = 0; i < processed; i++) {
+        const event = scenario.acceptedEvents[i];
+        const index = scenario.initialPrices.length + i;
+        prices[index] = event.price;
+        times[index] = event.writeTime;
+        ids[index] = event.bidder;
+      }
+      return { prices, times, ids, processed };
+    }
+
+    function playerBidAt(t, player) {
+      if (player.trigger === "manual"
+        && Number.isFinite(player.clickTime)
+        && player.clickTime <= t
+        && t < player.writeTime) {
+        return {
+          price: player.price,
+          writeTime: player.writeTime,
+          clickTime: player.clickTime,
+          pending: true
+        };
+      }
+      if (player.status === "valid" && player.writeTime <= t) {
+        return {
+          price: player.price,
+          writeTime: player.writeTime,
+          clickTime: player.clickTime,
+          pending: false
+        };
+      }
+      return null;
+    }
+
+    function formatPrice(price) {
+      return Number(price).toLocaleString("zh-CN");
+    }
+
+    function formatClock(t) {
+      const totalTenths = Math.round((11 * 3600 + 29 * 60 + 50 + t) * 10);
+      const hours = Math.floor(totalTenths / 36000) % 24;
+      const minutes = Math.floor(totalTenths / 600) % 60;
+      const seconds = Math.floor(totalTenths / 10) % 60;
+      const tenths = totalTenths % 10;
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
+    }
+
+    function render() {
+      const scenario = state.scenario;
+      const player = state.player;
+      const t = state.playback.t;
+      const book = bookAt(t, scenario);
+      const playerBid = playerBidAt(t, player);
+      const marketFloor = floorAt(scenario.floorEvents, t);
+
+      renderBuckets(book, playerBid, marketFloor);
+      dom.remaining.textContent = `${(DURATION - t).toFixed(1)}s`;
+      dom.range.textContent = `${formatPrice(marketFloor - BAND)}–${formatPrice(
+        Math.min(marketFloor + BAND, scenario.anchor.maxPrice ?? Infinity)
+      )}`;
+      dom.floor.textContent = formatPrice(marketFloor);
+      const finalPlayerBid = player.status === "valid"
+        ? { price: player.finalPrice, writeTime: player.finalWriteTime }
+        : null;
+      const finalMarket = finalPlayerBid
+        ? marketStats(scenario.finalPrices, scenario.finalTimes, scenario.quota, finalPlayerBid)
+        : scenario.finalMarket;
+      dom.averagePrice.textContent = `${formatPrice(Math.round(finalMarket.averagePrice))} / ${formatPrice(scenario.anchor.averagePrice)}`;
+      dom.simF.textContent = `${formatPrice(finalMarket.floor)} / ${formatPrice(scenario.anchor.finalFloor)}`;
+      const simCutoff = finalMarket.cutoffTime < 0
+        ? "尾盘窗前"
+        : formatClock(finalMarket.cutoffTime);
+      const officialCutoff = scenario.anchor.cutoffRemaining == null
+        ? "—"
+        : `${formatClock(DURATION - scenario.anchor.cutoffRemaining)} 第 ${scenario.anchor.cutoffRank.toLocaleString("zh-CN")} 位`;
+      dom.cutoff.textContent = `${simCutoff} / ${officialCutoff}`;
+      const playerWritten = player.status === "valid" && player.writeTime <= t;
+      const submittedBidders = book.prices.length + (playerWritten ? 1 : 0);
+      dom.activity.textContent = `${scenario.quota.toLocaleString("zh-CN")} / ${submittedBidders.toLocaleString("zh-CN")}`;
+      dom.progress.value = String(t);
+      dom.clock.textContent = formatClock(t);
+      dom.play.textContent = state.playback.playing ? "❚❚" : "▶";
+      renderResult();
+      state.playback.lastRender = t;
+    }
+
+    function compareBids(a, b) {
+      return b.price - a.price || a.time - b.time || String(a.id).localeCompare(String(b.id));
+    }
+
+    function groupBucketDots(dots, isWinningDisplay) {
+      const grouped = [];
+      const bidGroups = new Map();
+
+      for (const dot of dots) {
+        const winner = isWinningDisplay(dot);
+        const key = winner ? "winner" : "other";
+        if (!bidGroups.has(key)) bidGroups.set(key, []);
+        bidGroups.get(key).push(dot);
+      }
+
+      for (const [key, bids] of bidGroups) {
+        for (let i = 0; i < bids.length; i += DOT_GROUP_SIZE) {
+          const members = bids.slice(i, i + DOT_GROUP_SIZE);
+          grouped.push({
+            price: members[0].price,
+            time: members[0].time,
+            firstTime: members[0].time,
+            lastTime: members[members.length - 1].time,
+            player: false,
+            containsPlayer: members.some(member => member.player),
+            winner: key === "winner",
+            count: members.length,
+            id: `${key}-${members[0].id}`
+          });
+        }
+      }
+
+      grouped.sort((a, b) => a.firstTime - b.firstTime || compareBids(a, b));
+      return grouped;
+    }
+
+    function renderBuckets(book, playerBid, marketFloor) {
+      const scenario = state.scenario;
+      const scrollPositions = new Map(
+        [...dom.buckets.querySelectorAll(".bucket")].map(bucket => [
+          bucket.dataset.price,
+          bucket.querySelector(".dots")?.scrollTop || 0
+        ])
+      );
+      const ranked = [];
+      for (let i = 0; i < book.prices.length; i++) {
+        ranked.push({
+          price: book.prices[i],
+          time: book.times[i],
+          player: false,
+          id: book.ids[i]
+        });
+      }
+      if (playerBid) {
+        ranked.push({
+          price: playerBid.price,
+          time: playerBid.writeTime,
+          player: true,
+          pending: playerBid.pending,
+          clickTime: playerBid.clickTime,
+          id: "player"
+        });
+      }
+      ranked.sort(compareBids);
+      const winningIds = new Set();
+      for (let i = 0; i < Math.min(scenario.quota, ranked.length); i++) {
+        winningIds.add(ranked[i].id);
+      }
+      const isWinningDisplay = bid => winningIds.has(bid.id)
+        && bid.price >= marketFloor - BAND
+        && bid.price <= marketFloor + BAND;
+      const isHighlighted = bid => !bid.player && isWinningDisplay(bid);
+      let bookMin = ranked[0].price;
+      let bookMax = ranked[0].price;
+      for (const bid of ranked) {
+        bookMin = Math.min(bookMin, bid.price);
+        bookMax = Math.max(bookMax, bid.price);
+      }
+      const minPrice = Math.min(
+        scenario.anchor.finalFloor - 800,
+        marketFloor - 400,
+        bookMin
+      );
+      const visibleMaxPrice = Math.min(
+        scenario.anchor.maxPrice ?? Infinity,
+        Math.max(
+        scenario.anchor.finalFloor + 800,
+        marketFloor + 400,
+        bookMax
+        )
+      );
+      const visiblePrices = [];
+      for (let price = roundPrice(minPrice); price <= roundPrice(visibleMaxPrice); price += PRICE_STEP) {
+        visiblePrices.push(price);
+      }
+
+      const occupants = new Map(visiblePrices.map(price => [price, []]));
+      for (const bid of ranked) {
+        const bucket = occupants.get(bid.price);
+        if (bucket) bucket.push(bid);
+      }
+      for (const bucket of occupants.values()) {
+        bucket.sort((a, b) => {
+          if (a.time !== b.time) return a.time - b.time;
+          if (a.player !== b.player) return a.player ? 1 : -1;
+          return String(a.id).localeCompare(String(b.id));
+        });
+      }
+
+      const fragment = document.createDocumentFragment();
+      for (const price of visiblePrices) {
+        const dots = occupants.get(price);
+        const count = dots.length;
+        const displayDots = groupBucketDots(dots, isWinningDisplay);
+        const element = document.createElement("div");
+        element.className = "bucket";
+        element.dataset.price = String(price);
+        if (dots.some(isHighlighted)) element.classList.add("has-winner");
+        const inRange = price >= marketFloor - BAND
+          && price <= marketFloor + BAND
+          && price <= (scenario.anchor.maxPrice ?? Infinity);
+        if (inRange) element.classList.add("in-range");
+        if (!state.manualBid
+          && inRange) {
+          element.classList.add("manual-clickable");
+        }
+
+        const dotsHtml = displayDots.map(dot => {
+          const classes = [
+            "dot",
+            dot.winner ? "winner" : "",
+            dot.containsPlayer ? "player-group" : ""
+          ].filter(Boolean).join(" ");
+          const bidder = dot.containsPlayer
+            ? `玩家所在聚合点 · 共 ${dot.count.toLocaleString("zh-CN")} 名竞买人`
+            : `${dot.count.toLocaleString("zh-CN")} 名竞买人`;
+          const timing = dot.firstTime === dot.lastTime
+            ? `出价时间 ${formatClock(dot.time)}`
+            : `提交时间 ${formatClock(dot.firstTime)}–${formatClock(dot.lastTime)}`;
+          const label = `${bidder} · ${formatPrice(price)} · ${timing}`;
+          return `<span class="${classes}" data-bidder="${dot.id}" data-tooltip="${label}" aria-label="${label}"></span>`;
+        }).join("");
+
+        element.innerHTML = `
+          ${price === marketFloor ? '<span class="range-flag">▲</span>' : ""}
+          <span class="bucket-count">${count}</span>
+          <div class="dots">${dotsHtml}</div>
+          <span class="bucket-price">${price}</span>
+        `;
+        fragment.appendChild(element);
+      }
+      dom.buckets.replaceChildren(fragment);
+      for (const bucket of dom.buckets.querySelectorAll(".bucket")) {
+        const scrollTop = scrollPositions.get(bucket.dataset.price);
+        if (scrollTop != null) bucket.querySelector(".dots").scrollTop = scrollTop;
+      }
+    }
+
+    function renderResult() {
+      const player = state.player;
+      const labels = {
+        valid: "出价有效",
+        late: "写入超时，没有有效报价",
+        "invalid-out-of-range": "处理时越界，没有有效报价",
+        "not-triggered": "未触发，没有有效报价"
+      };
+      const timing = Number.isFinite(player.clickTime)
+        ? `点击 ${player.clickTime.toFixed(2)}s，写入 ${player.writeTime.toFixed(2)}s`
+        : "没有生成修改事件";
+      const processing = player.processingFloor == null
+        ? ""
+        : `；处理时 L=${formatPrice(player.processingFloor)}`;
+
+      const waitingManual = player.status === "not-triggered";
+      dom.result.className = `result ${player.won ? "win" : waitingManual ? "" : "loss"}`;
+      dom.result.innerHTML = `
+        <strong>${waitingManual ? "等待手动出价" : player.won ? "中标" : "未中标"}${player.rank == null ? "" : ` · 第 ${player.rank.toLocaleString("zh-CN")} 名`}</strong>
+        <div class="result-detail">
+          ${labels[player.status]}；${timing}${processing}<br>
+          ${waitingManual
+            ? "请点击当前黑框有效区间内的价格 bucket"
+            : player.status === "valid"
+            ? `最终参与撮合报价 <b>${formatPrice(player.finalPrice)}</b>`
+            : `目标报价 ${formatPrice(player.price)} 未进入撮合`}
+        </div>
+      `;
+    }
+
+    function rebuildScenario() {
+      const anchor = monthAnchors.find(item => item.id === dom.month.value) || monthAnchors[0];
+      state.scenario = generateScenario(anchor, dom.seed.value.trim() || "1");
+      state.manualBid = null;
+      state.playback.t = 0;
+      state.playback.playing = false;
+      state.playback.lastRender = -1;
+      dom.scenarioHash.textContent = `scenario ${state.scenario.hash}`;
+      simulateAndRenderPlayer();
+    }
+
+    function simulateAndRenderPlayer() {
+      state.player = simulateManualPlayer(state.manualBid, state.scenario);
+      render();
+    }
+
+    function runSelfChecks() {
+      const scenario = state.scenario;
+      const initialCounts = new Map();
+      for (const price of scenario.initialPrices) changeCount(initialCounts, price, 1);
+      console.assert(scenario.participants > scenario.quota, "participants 必须大于 quota");
+      console.assert(scenario.finalPrices.length + 1 === scenario.participants, "每名竞买人只能有一笔报价");
+      console.assert(
+        scenario.floorEvents[0].price === floorFromCounts(initialCounts, scenario.quota),
+        "初始 L 必须由 book 推导"
+      );
+      let highestNpcBid = Math.max(...scenario.initialPrices);
+      console.assert(
+        highestNpcBid <= scenario.floorEvents[0].price + BAND,
+        "T0 的 NPC 出价不得高于有效区间"
+      );
+      for (const event of scenario.acceptedEvents) {
+        highestNpcBid = Math.max(highestNpcBid, event.price);
+        console.assert(
+          highestNpcBid <= floorAt(scenario.floorEvents, event.writeTime) + BAND,
+          "任意时刻的 NPC 出价不得高于有效区间"
+        );
+      }
+      console.assert(
+        highestNpcBid <= (scenario.anchor.maxPrice ?? Infinity),
+        "NPC 出价不得超过场景最高价"
+      );
+      console.assert(Number.isFinite(scenario.finalMarket.floor), "最终 F 必须存在");
+      console.assert(
+        scenario.finalMarket.averagePrice >= scenario.finalMarket.floor,
+        "平均成交价不得低于最低成交价"
+      );
+    }
+
+    function animationFrame(timestamp) {
+      if (state.playback.playing) {
+        if (!state.playback.lastFrame) state.playback.lastFrame = timestamp;
+        const delta = (timestamp - state.playback.lastFrame) / 1000;
+        state.playback.lastFrame = timestamp;
+        state.playback.t = Math.min(DURATION, state.playback.t + delta * Number(dom.playbackRate.value));
+        if (state.playback.t >= DURATION) state.playback.playing = false;
+      } else {
+        state.playback.lastFrame = timestamp;
+      }
+
+      if (state.playback.playing && Math.abs(state.playback.t - state.playback.lastRender) >= 0.08) {
+        render();
+      }
+      requestAnimationFrame(animationFrame);
+    }
+
+    for (const anchor of monthAnchors) {
+      const option = document.createElement("option");
+      option.value = anchor.id;
+      option.textContent = `${anchor.label}${anchor.estimated ? "（人数估算）" : ""}`;
+      dom.month.appendChild(option);
+    }
+    dom.month.value = "2025-10";
+
+    dom.regenerate.addEventListener("click", rebuildScenario);
+    dom.month.addEventListener("change", rebuildScenario);
+    dom.play.addEventListener("click", () => {
+      if (state.playback.t >= DURATION) state.playback.t = 0;
+      state.playback.playing = !state.playback.playing;
+      state.playback.lastFrame = 0;
+      render();
+    });
+    dom.replay.addEventListener("click", () => {
+      state.manualBid = null;
+      state.playback.t = 0;
+      state.playback.playing = true;
+      state.playback.lastFrame = 0;
+      simulateAndRenderPlayer();
+    });
+    dom.progress.addEventListener("input", () => {
+      state.playback.playing = false;
+      state.playback.t = Number(dom.progress.value);
+      render();
+    });
+    dom.buckets.addEventListener("pointerover", event => {
+      const dot = event.target.closest(".dot");
+      if (!dot) return;
+      dom.bidTooltip.textContent = dot.dataset.tooltip;
+      dom.bidTooltip.style.left = `${event.clientX + 12}px`;
+      dom.bidTooltip.style.top = `${event.clientY + 12}px`;
+      dom.bidTooltip.classList.add("visible");
+    });
+    dom.buckets.addEventListener("pointermove", event => {
+      if (!dom.bidTooltip.classList.contains("visible")) return;
+      dom.bidTooltip.style.left = `${event.clientX + 12}px`;
+      dom.bidTooltip.style.top = `${event.clientY + 12}px`;
+    });
+    dom.buckets.addEventListener("pointerout", event => {
+      if (event.target.closest(".dot")) dom.bidTooltip.classList.remove("visible");
+    });
+    dom.buckets.addEventListener("pointerdown", event => {
+      const bucket = event.target.closest(".bucket.manual-clickable");
+      if (!bucket || state.manualBid) return;
+      event.preventDefault();
+      state.manualBid = {
+        price: Number(bucket.dataset.price),
+        clickTime: state.playback.t
+      };
+      simulateAndRenderPlayer();
+    });
+
+    dom.strategyHint.textContent = "播放或拖动到任意时刻，点击黑框内任一价格 bucket；点击即写入且红点保留到结束，本场只接受一次。";
+    rebuildScenario();
+    runSelfChecks();
+    requestAnimationFrame(animationFrame);
+
+    window.__auctionSim = {
+      generateScenario,
+      simulateManualPlayer,
+      floorFromCounts,
+      floorAt,
+      monthAnchors,
+      getState: () => state
+    };
+  </script>
+</body>
+</html>
